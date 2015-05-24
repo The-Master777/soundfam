@@ -15,16 +15,19 @@ class SSDPServiceDiscoverer(object):
 
     __metaclass__ = ABCMeta
 
+    # Some default values
     _SSDP_INFO = {'ssdp_address': '239.255.255.250', 'ssdp_port': 1900}
     _SSDP_DISCOVERY_DEFAULT_TIMEOUT = 1 # 1 second timeout
-    _SSDP_DISCOVERY_DEFAULT_RETRY_DELAY = 0.01 # Approx 10ms
+    _SSDP_DISCOVERY_DEFAULT_RETRY_DELAY = 0.01 # Approx. 10ms
     _SSDP_DISCOVERY_DEFAULT_TRIES_COUNT = 2 # Number of attempts
     _SSDP_DISCOVERY_DEFAULT_MX = 3 # MX = 3
     _SSDP_DISCOVERY_DEFAULT_TTL = 10 # TTL = 10
     _SSDP_DISCOVERY_RECV_BUFFER_SIZE = 1 << 13 # Buffer size is 8192 bytes. Longer recv. messages might be broken.
 
+    # The CRLF terminal string
     _CRLF = "\r\n"
 
+    # The basic structure of a M-SEARCH request
     _MSEARCH_REQUEST_TEMPLATE = _CRLF.join([
         'M-SEARCH * HTTP/1.1',
         'HOST: {ssdp_address}:{ssdp_port}',
@@ -47,7 +50,7 @@ class SSDPServiceDiscoverer(object):
         :param uuid: The unique identifier of the search to use, or None if a random id should be generated.
         """
 
-        # Use provided uuid or generate a new one if needed
+        # Use provided UUID or generate a new one if needed
         uuid = uuid or uuid4()
 
         # Create request message
@@ -66,7 +69,7 @@ class SSDPServiceDiscoverer(object):
                 if i < numTries - 1:
                     time.sleep(retryDelaySeconds) 
 
-            # Try to receive the resposes
+            # Try to receive the responses
             while True:
                 try:
                     # FIXME: This will probably destroy the message if the  
@@ -124,6 +127,8 @@ class BasicSSDPServiceDiscoverer(SSDPServiceDiscoverer):
 
     def _handleResponse(self, response, uuid):
         """Parses all responses received for a discovery and returns a list of SSDPResponse.
+        The responses are cached until the finalization-phase of the discovery-process is 
+        entered. Then the cached entries are parsed.
 
         :param str response: The response to handle.
         :param uuid: The unique identifier associated with a discovery process.
@@ -143,14 +148,15 @@ class BasicSSDPServiceDiscoverer(SSDPServiceDiscoverer):
         if uuid not in self._responseCache:
             return None
 
+        # Get cached entries and delete cache entry
+        entries = self._responseCache[uuid]
+        del self._responseCache[uuid]
+
         resps = set()
 
         # Parse all responses
-        for r in self._responseCache[uuid]:
+        for r in entries:
             resps.add(BasicSSDPServiceDiscoverer.SSDPResponse(r))
-
-        # Remove entry from cache
-        del self._responseCache[uuid]
 
         return resps
 
