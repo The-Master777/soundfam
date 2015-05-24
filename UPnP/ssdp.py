@@ -120,7 +120,7 @@ class BasicSSDPServiceDiscoverer(SSDPServiceDiscoverer):
     """
 
     def __init__(self):
-        """Initialize the BasicSSDPServiceDiscoverer"""
+        """Initializes the BasicSSDPServiceDiscoverer instance"""
         super(BasicSSDPServiceDiscoverer, self).__init__()
 
         self._responseCache = {}
@@ -164,6 +164,7 @@ class BasicSSDPServiceDiscoverer(SSDPServiceDiscoverer):
         """A container class for received SSDP responses."""
 
         def __init__(self, response):
+            """Initializes the SSDPResponse instance based on a response string"""
             super(BasicSSDPServiceDiscoverer.SSDPResponse, self).__init__()
 
             # Initialize fields
