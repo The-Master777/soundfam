@@ -9,18 +9,31 @@ from abc import ABCMeta, abstractmethod
 from requests.structures import CaseInsensitiveDict
 
 class SSDPServiceDiscoverer(object):
-    """An implementation of the service discovery process as described by SSDP, 
-    the Simple Service Discovery Protocol. This can be used to discover present 
-    UPnP-Services in the local network."""
+    """An implementation of the discovery process as described by SSDP, the 
+    Simple Service Discovery Protocol. This can be used to discover present 
+    UPnP-Devices and -Services in the local network."""
 
     __metaclass__ = ABCMeta
 
+    _MCAST_ADDR = '239.255.255.250'
+    _MCAST_PORT = 1900
+
+    _SSDP_ST_SSDP_ALL = 'ssdp:all'
+    _SSDP_ST_UPNP_ROOTDEVICE = 'upnp:rootdevice'
+    _SSDP_ST_UUID_TEMPLATE = 'uuid:{device_uuid}'
+
+    # A dictionary for known non-parameterized M-SEARCH request ST-Values
+    ST_VALUES = {'all': _SSDP_ST_SSDP_ALL, 'rootdevice': _SSDP_ST_UPNP_ROOTDEVICE}
+
     # Some default values
-    _SSDP_INFO = {'ssdp_address': '239.255.255.250', 'ssdp_port': 1900}
-    _SSDP_DISCOVERY_DEFAULT_TIMEOUT = 1 # 1 second timeout
+    _SSDP_INFO = {'ssdp_address': _MCAST_ADDR, 'ssdp_port': _MCAST_PORT}
+    _SSDP_DISCOVERY_DEFAULT_ST = _SSDP_ST_SSDP_ALL # Find services of all SSDP-enabled devices
+    _SSDP_DISCOVERY_DEFAULT_TIMEOUT = 2 # 1 second timeout
     _SSDP_DISCOVERY_DEFAULT_RETRY_DELAY = 0.01 # Approx. 10ms
     _SSDP_DISCOVERY_DEFAULT_TRIES_COUNT = 2 # Number of attempts
-    _SSDP_DISCOVERY_DEFAULT_MX = 3 # MX = 3
+
+    #: The MX Header field of the SSDP discovery M-Search request as described in <http://upnp.org/specs/arch/UPnP-arch-DeviceArchitecture-v1.1.pdf> defines the wait time in seconds. It MUST be greater than or equal to 1 and SHOULD be less than 5 inclusive. Device responses SHOULD be delayed a random duration between 0 and this many seconds to balance load for the control point when it processes responses. Integer.
+    _SSDP_DISCOVERY_DEFAULT_MX = 1 # MX = 1
     _SSDP_DISCOVERY_DEFAULT_TTL = 10 # TTL = 10
     _SSDP_DISCOVERY_RECV_BUFFER_SIZE = 1 << 13 # Buffer size is 8192 bytes. Longer recv. messages might be broken.
 
@@ -38,8 +51,8 @@ class SSDPServiceDiscoverer(object):
         '',
     ])
 
-    def discover(self, serviceType, timeout=_SSDP_DISCOVERY_DEFAULT_TIMEOUT, numTries=_SSDP_DISCOVERY_DEFAULT_TRIES_COUNT, retryDelaySeconds=_SSDP_DISCOVERY_DEFAULT_RETRY_DELAY, mx=_SSDP_DISCOVERY_DEFAULT_MX, ttl=_SSDP_DISCOVERY_DEFAULT_TTL, uuid=None):
-        """Perform a service discovery in the local network.
+    def discover(self, serviceType=_SSDP_DISCOVERY_DEFAULT_ST, timeout=_SSDP_DISCOVERY_DEFAULT_TIMEOUT, numTries=_SSDP_DISCOVERY_DEFAULT_TRIES_COUNT, retryDelaySeconds=_SSDP_DISCOVERY_DEFAULT_RETRY_DELAY, mx=_SSDP_DISCOVERY_DEFAULT_MX, ttl=_SSDP_DISCOVERY_DEFAULT_TTL, uuid=None):
+        """Perform a discovery for default or specified device or service in the local network.
 
         :param str serviceType: The ST service type descriptor of the service to discover.
         :param int timeout: The time to wait for discovery replies.
@@ -52,6 +65,16 @@ class SSDPServiceDiscoverer(object):
 
         # Use provided UUID or generate a new one if needed
         uuid = uuid or uuid4()
+
+        # TODO: Handle non-ASCII M-SEARCH request MX and ST header field values.
+        # HTTP header field values cannot contain characters outside of the 
+        # ISO-8859-1 character set. Only ASCII-characters are guaranteed to work.
+        #
+        #  Options:
+        #   - Reject invalid values
+        #   - Apply Percent Encoding (urlencoding)
+        #   - Apply MIME Encoding ("=?UTF-8?Q?...?=")
+        #
 
         # Create request message
         m = self._MSEARCH_REQUEST_TEMPLATE.format(mx=mx, st=serviceType, **self._SSDP_INFO)
@@ -97,6 +120,21 @@ class SSDPServiceDiscoverer(object):
                 # Finalize the handling of SSDP responses      | E
                 # Return whatever is returned by the handler   |
                 return self._handleResponse(None, uuid) # <----´
+
+    def discoverRootdevices(self, timeout=_SSDP_DISCOVERY_DEFAULT_TIMEOUT, numTries=_SSDP_DISCOVERY_DEFAULT_TRIES_COUNT, retryDelaySeconds=_SSDP_DISCOVERY_DEFAULT_RETRY_DELAY, mx=_SSDP_DISCOVERY_DEFAULT_MX, ttl=_SSDP_DISCOVERY_DEFAULT_TTL, uuid=None):
+        return self.discover(serviceType=self._SSDP_ST_UPNP_ROOTDEVICE, timeout=timeout, numTries=numTries, retryDelaySeconds=retryDelaySeconds, mx=mx, ttl=ttl, uuid=uuid)
+
+    def discoverDevice(self, deviceId, timeout=_SSDP_DISCOVERY_DEFAULT_TIMEOUT, numTries=_SSDP_DISCOVERY_DEFAULT_TRIES_COUNT, retryDelaySeconds=_SSDP_DISCOVERY_DEFAULT_RETRY_DELAY, mx=_SSDP_DISCOVERY_DEFAULT_MX, ttl=_SSDP_DISCOVERY_DEFAULT_TTL, uuid=None):
+        if deviceId is None:
+            raise ValueError('The deviceId must not be None')
+
+        st = deviceId
+
+        if not st.startswith('uuid:'):
+            # format device uuid ST parameter
+            st = self._SSDP_ST_UUID_TEMPLATE.format(device_uuid=deviceId)
+
+        return self.discover(serviceType=st, timeout=timeout, numTries=numTries, retryDelaySeconds=retryDelaySeconds, mx=mx, ttl=ttl, uuid=uuid)
 
     @abstractmethod
     def _handleResponse(self, response, uuid):
@@ -215,3 +253,11 @@ class BasicSSDPServiceDiscoverer(SSDPServiceDiscoverer):
 
         def __ne__(self, other):
             return not self.__eq__(other)
+
+if __name__ == '__main__':
+    # Searches for all SSDP services
+    s = BasicSSDPServiceDiscoverer().discover()
+
+    if s is not None:
+        for r in s:
+            print(r)
